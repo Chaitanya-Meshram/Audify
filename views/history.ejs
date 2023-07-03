@@ -1,0 +1,83 @@
+<%- include('partials/header') %>
+
+    <section class="navbar-bg">
+        <nav class="navbar navbar-expand-lg navbar-light">
+            <div class="container">
+                <a class="navbar-brand" href=""><img alt="" width="32" height="32" src="/images/logo7.png"
+                        class="brand-logo hidden-xs-down" />
+                    <strong>audify</strong>
+                </a>
+
+            </div>
+            <button type="button" class="navbar-toggler" data-toggle="collapse" data-target="#navbarCollapse">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+
+            <div id="navbarCollapse" class="collapse navbar-collapse justify-content-start">
+
+
+                <div class="navbar-nav ml-auto action-buttons">
+
+                    <a href="/login" class="btn login-btn">SignOut</a>
+
+                </div>
+            </div>
+        </nav>
+    </section>
+    <main>
+        <div class="container my-5 history">
+            <div class="card-body">
+                <h2 class="card-title">Hey Sparsh!</h2>
+                <p class="card-text">Here are your recent audios:</p>
+            </div>
+            <div class="card">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th scope="col">List Name</th>
+                            <th scope="col">Details</th>
+                            <th scope="col">Edit List </th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+
+                            <td>
+                                <h3 class="display-7 color sub-title"><strong> Secret Audio 1</strong> </h3>
+                            </td>
+                            <td>
+                                <p class="fw-bold color sub-title"><strong>Created on: December 25, 2022 </strong> </p>
+                                <p class="fw-bold color sub-title"><strong>Last Modified: December 31, 2022</strong> </p>
+                                <p class="fw-bold color sub-title"><strong>Duration: 5 min 30 sec</strong> </p>
+                                <p class="fw-bold color sub-title"><strong>Comments: 3</strong> </p>
+                            </td>
+                            <td>
+                                <a class="btn btn-sm btn-primary" href="#"><i class="far fa-edit"></i> edit</a>
+                                <a class="btn btn-sm btn-danger" href="#"><i class="fas fa-trash-alt"></i> delete</a>
+                            </td>
+                        </tr>
+                        <tr>
+
+                            <td>
+                                <h3 class="display-7 color sub-title"><strong> Secret Audio 2</strong> </h3>
+                            </td>
+                            <td>
+                                <p class="fw-bold color sub-title"><strong>Created on: December 25, 2022 </strong> </p>
+                                <p class="fw-bold color sub-title"><strong>Last Modified: December 31, 2022</strong> </p>
+                                <p class="fw-bold color sub-title"><strong>Duration: 5 min 30 sec</strong> </p>
+                                <p class="fw-bold color sub-title"><strong>Comments: 3</strong> </p>
+                            </td>
+                            <td>
+                                <a class="btn btn-sm btn-primary" href="#"><i class="far fa-edit"></i> edit</a>
+                                <a class="btn btn-sm btn-danger" href="#"><i class="fas fa-trash-alt"></i> delete</a>
+                            </td>
+                        </tr>
+
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+
+    <%- include('partials/footer') %>
