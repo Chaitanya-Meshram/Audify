@@ -15,10 +15,25 @@ const extractAudio = require('ffmpeg-extract-audio')
 const download = require('download');
 const multer = require('multer');
 // const { MongoClient } = require('mongodb');
-const ffmpeg = require('fluent-ffmpeg');
+// const ffmpeg = require('fluent-ffmpeg');
 const { Readable } = require('stream');
 const { MongoClient, ObjectId } = require('mongodb');
 const fs = require('fs');
+const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+const ffmpeg = require('fluent-ffmpeg');
+ffmpeg.setFfmpegPath(ffmpegPath);
+// const SpeechToTextV1 = require('watson-developer-cloud/speech-to-text/v1');
+// const DeepSpeech = require('deepspeech');
+// const { Pocketsphinx } = require('pocketsphinx');
+const Creatomate = require('creatomate');
+const transcribe = require('./transcribe');
+const generateSubtitles = require('./generateSubtitles');
+
+const client = new Creatomate.Client(process.env.CREATOMATE_API_KEY);
+
+
+
+
 
 const app = express();
 
@@ -39,7 +54,6 @@ app.use(session({
 app.use(passport.initialize());
 app.use(passport.session());
 
-
 mongoose.connect("mongodb+srv://admin-chaitanya:Test123@cluster0.upazi.mongodb.net/audify?retryWrites=true&w=majority");
 
 const userSchema = new mongoose.Schema({
@@ -50,7 +64,9 @@ const userSchema = new mongoose.Schema({
   microsoftId: String
 });
 const audioSchema = new mongoose.Schema({
-  name: String,
+  userid: ObjectId,
+  videoname: String,
+  audioname: String,
   video: Buffer,
   audio: Buffer
 });
@@ -193,7 +209,7 @@ app.get("/login", function (req, res) {
 });
 app.post("/login", function (req, res) {
   const user = new User({
-    username: req.body.username,
+    email: req.body.email,
     password: req.body.password
   });
 
@@ -213,7 +229,7 @@ app.get("/register", function (req, res) {
 });
 app.post("/register", function (req, res) {
   User.register({
-    username: req.body.username
+    email: req.body.email
   }, req.body.password, function (err, user) {
     if (err) {
       console.log(err);
@@ -226,126 +242,99 @@ app.post("/register", function (req, res) {
   });
 });
 
-app.get("/submit", function (req, res) {
+app.get("/history", function (req, res) {
   if (req.isAuthenticated()) {
-    res.render("submit");
+    res.render("history");
   } else {
     res.redirect("/login");
   }
 });
-app.post("/submit", function (req, res) {
-  const submittedSecret = req.body.secret;
-  User.findById(req.user.id, function (err, user) {
-    if (err) {
-      console.log(err);
-    } else {
-      if (user) {
-        user.secret = submittedSecret;
-        user.save(function () {
-          res.redirect("/secrets");
-        });
-      }
-    }
-  });
-});
+
+// app.post("/history", function (req, res) {
+//   const submittedSecret = req.body.secret;
+//   User.findById(req.user.id, function (err, user) {
+//     if (err) {
+//       console.log(err);
+//     } else {
+//       if (user) {
+//         user.secret = submittedSecret;
+//         user.save(function () {
+//           res.redirect("/secrets");
+//         });
+//       }
+//     }
+//   });
+// });
 
 app.get("/secrets", function (req, res) {
-  User.find({
-    "secret": {
-      $ne: null
-    }
-  }, function (err, users) {
-    if (err) {
-      console.log(err);
-    } else {
-      if (users) {
-        res.render("secrets", {
-          converted: false
-        });
-      }
-    }
+  res.render("secrets", {
+    converted: false
   });
 });
 
 // upload.single('videofile')
-app.post("/upload", upload.single('videofile'), function (req, res) {
+app.post("/upload", upload.single('videofile'), async function (req, res) {
   const file = req.file.buffer;
   const fileName = req.file.originalname;
   // Example usage
   var videoId; // Replace with the ID of the video file stored in MongoDB
 
-  Audio.findOrCreate({
-    name: fileName,
+  const dbName = 'audify'; // Name of your MongoDB database
+  const collectionName = 'audios';  // Collection name where the video file is stored
+
+  await Audio.findOrCreate({
+    userid: req.user.id,
+    videoname: fileName,
     video: file
   }, function (err, res) {
     if (err) {
       console.log(err);
     } else {
       videoId = res.id;
-      console.log('File uploaded to MongoDB!', videoId);
+      console.log('File uploaded to MongoDB!');
     }
   });
-  // Audio.findOne({ name: fileName }, function (err, user) {
-  //   if (err) {
-  //     console.log(err);
-  //   } else {
-  //     if (file) {
 
-  //       // file.save();
-  //     }
-  //   }
-  // });
-  const uri = 'mongodb+srv://admin-chaitanya:Test123@cluster0.upazi.mongodb.net/audify?retryWrites=true&w=majority'; // MongoDB connection URI
-  const dbName = 'audify'; // Name of your MongoDB database
-  // Collection name where the video file is stored
-  const collectionName = 'audios';
-
-  const client = new MongoClient(uri);
-
-  async function connect() {
-    try {
-      await client.connect();
-      console.log('Connected to MongoDB');
-    } catch (error) {
-      console.error('Error connecting to MongoDB:', error);
-    }
-  }
-  connect();
+  // Get the video document from MongoDB
+  const document = await Audio.findOne({ _id: new ObjectId(videoId) });
 
   async function convertVideoToAudio(videoId) {
     try {
       // Get the video document from MongoDB
-      const db = client.db(dbName);
-      const collection = db.collection(collectionName);
-      const video = await collection.findOne({ _id: videoId });
-
+      // const db = client.db(dbName);
+      // const collection = db.collection(collectionName);
       // Generate a unique filename for the audio file
       const audioFilename = `audio_${videoId}.mp3`;
-
       // Convert the video to audio using FFmpeg
-      ffmpeg(video.filePath)
+      ffmpeg(document.video)
+        .noVideo()
         .output(audioFilename)
         .on('end', async () => {
           // Read the converted audio file
-          const audioFileData = await fs.promises.readFile(audioFilename);
+          const audioFileData = fs.promises.readFile(audioFilename);
 
           // Update the video document with the audio file data
-          await collection.updateOne(
-            { _id: videoId },
+          await Audio.updateOne(
+            { _id: new ObjectId(videoId) },
             {
               $set: {
                 audio: audioFileData,
-                name: audioFilename
+                audioname: audioFilename
               }
             }
           );
 
           // Save the audio file on your device
-          await fs.promises.writeFile(audioFilename, audioFileData);
-
+          fs.promises.writeFile(audioFilename, audioFileData);
+          res.render("secrets", {
+            converted: true
+          });
           console.log('Video converted to audio and saved successfully.');
         })
         .on('error', (error) => {
+          res.render("secrets", {
+            converted: false
+          });
           console.error('Error converting video to audio:', error);
         })
         .run();
@@ -354,6 +343,103 @@ app.post("/upload", upload.single('videofile'), function (req, res) {
     }
   }
   convertVideoToAudio(videoId);
+
+  // var audioData;
+  // Audio.findOne({ _id: new ObjectId(videoId) }, function (err, res) {
+  //   if (err) {
+  //     console.log(err);
+  //   } else {
+  //     audioData = res.filePath;
+  //     console.log('File audio file found!');
+  //   }
+  // });
+
+
+  // Note: Provide these AWS settings
+  const awsRegion = 'us-west-1';
+  const bucketName = 'audify-project';
+  const bucketKey = `subtitle-${new Date().getTime()}`;
+  const transcribeJobName = `example-${new Date().getTime()}`;
+
+  // Note: Provide a URL to a video file
+  const mediaUri = `https://s3-us-west-1.amazonaws.com/${bucketName}/${bucketKey}`;
+
+  async function run() {
+    console.log('Transcribing video using AWS Transcribe...');
+
+    // Invoke AWS Transcribe to automatically generate the subtitles from the video
+    await transcribe(transcribeJobName, mediaUri, awsRegion, bucketName, bucketKey);
+
+    // Create subtitle keyframes
+    const subtitleKeyframes = await generateSubtitles(awsRegion, bucketName, bucketKey);
+
+    console.log('Creating video with Creatomate...');
+
+    // Create the video. Note that we don't provide an output width and height,
+    // as the Creatomate API detects these automatically based on the first found video element
+    const source = new Creatomate.Source({
+      outputFormat: 'mp4',
+
+      elements: [
+
+        // The video file. Since we do not specify a duration, the length of the video element
+        // is determined by the video file provided
+        new Creatomate.Video({
+          source: mediaUri,
+        }),
+
+        // The subtitles
+        new Creatomate.Text({
+
+          // Make the subtitle container as large as the screen with some padding
+          width: '100%',
+          height: '100%',
+          xPadding: '3 vmin',
+          yPadding: '8 vmin',
+
+          // Align text to bottom center
+          xAlignment: '50%',
+          yAlignment: '100%',
+
+          // Text style – note that the default fill color is null (transparent)
+          fontWeight: '800',
+          fontSize: '8.48 vh',
+          fillColor: null,
+          shadowColor: 'rgba(0,0,0,0.65)',
+          shadowBlur: '1.6 vmin',
+
+          text: subtitleKeyframes,
+        }),
+
+        // Progress bar
+        new Creatomate.Rectangle({
+          x: '0%',
+          y: '0%',
+          width: '100%',
+          height: '3%',
+          xAnchor: '0%',
+          yAnchor: '0%',
+          fillColor: '#fff',
+          animations: [
+            new Creatomate.Wipe({
+              xAnchor: '0%',
+              fade: false,
+              easing: 'linear',
+            }),
+          ],
+        }),
+
+      ],
+    });
+
+    // Render the video
+    const renders = await client.render({ source });
+    console.log('Completed:', renders);
+  }
+
+  run()
+    .catch(error => console.error(error));
+
 
 });
 
