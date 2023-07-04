@@ -17,7 +17,7 @@ const multer = require('multer');
 // const { MongoClient } = require('mongodb');
 // const ffmpeg = require('fluent-ffmpeg');
 const { Readable } = require('stream');
-const { MongoClient, ObjectId, Timestamp, Double } = require('mongodb');
+const { MongoClient, GridFSBucket, ObjectId, Timestamp, Double } = require('mongodb');
 const fs = require('fs');
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
 const ffmpeg = require('fluent-ffmpeg');
@@ -345,22 +345,22 @@ app.get("/secrets", function (req, res) {
 var audioFilename;
 var audioFileData;
 
+
 // upload.single('videofile')
+
 app.post("/upload", upload.single('videofile'), async function (req, res) {
-  const username = req.user.username;
+
   if (req.isAuthenticated()) {
-    if (username === 'undefined') {
-      res.redirect("/login");
-    }
-    else {
-      console.log("user is authenticated");
-    }
+    console.log("user is authenticated");
   } else {
     res.redirect("/login");
   }
 
+  const username = req.user.username;
+  const filesize = req.file.size;
   const file = req.file.buffer;
   const fileName = req.file.originalname;
+  // console.log(req.file.size)
   // Example usage
   const uri = 'mongodb+srv://admin-chaitanya:Test123@cluster0.upazi.mongodb.net/audify?retryWrites=true&w=majority'; // MongoDB connection URI
   const dbName = 'audify'; // Name of your MongoDB database
@@ -379,42 +379,114 @@ app.post("/upload", upload.single('videofile'), async function (req, res) {
   }
   await connect();
 
+  const db = client.db(dbName);
+  const bucket = new GridFSBucket(db);
+  const videoPath = fileName;
+
   var videoId; // Replace with the ID of the video file stored in MongoDB
-  let audio = await Audio.findOne({ username: username, videoname: fileName, video: file });
-  if (!audio) {
-    audio = await Audio.create({ username: username, videoname: fileName, video: file });
-    console.log("Hello1");
-  } else {
-    console.log("Hello2");
+
+  async function convertLargeFile() {
+    fs.readFile(videoPath, (error, data) => {
+      if (error) {
+        console.error('Failed to read video file:', error);
+        return;
+      }
+      const uploadStream = bucket.openUploadStream(fileName);
+      uploadStream.write(data);
+      uploadStream.end();
+      // console.log(db.filename);
+      // console.log(db.fs.files.length);
+
+      uploadStream.on('finish', () => {
+        console.log('Video file uploaded successfully');
+
+        const videoname = uploadStream.filename;
+        videoId = uploadStream.id;
+        console.log(uploadStream.id)
+        console.log(uploadStream.filename)
+
+        // Generate a unique filename for the audio file
+        audioFilename = `audio_${videoname}_.mp3`;
+
+        // Convert the video to audio using FFmpeg
+        ffmpeg(videoname)
+          .output(audioFilename)
+          .on('end', async () => {
+            // Read the converted audio file
+            audioFileData = await fs.promises.readFile(audioFilename);
+
+            fs.readFile(audioFilename, (error, data) => {
+              if (error) {
+                console.error('Failed to read video file:', error);
+                return;
+              }
+              const uploadStream = bucket.openUploadStream(audioFilename);
+              uploadStream.write(data);
+              uploadStream.end();
+              // console.log(db.filename);
+              // console.log(db.fs.files.length);
+
+              uploadStream.on('finish', async () => {
+                console.log('Audio file uploaded successfully');
+
+                const { getVideoDurationInSeconds } = require('get-video-duration');
+                const duration = await getVideoDurationInSeconds(audioFilename);
+                console.log(duration);
+
+                // Update the video document with the audio file data
+                // Audio.create({ username: username, videoname: fileName, video: file });
+                await Audio.create(
+                  {
+                    username: username,
+                    videoname: fileName,
+                    duration: duration,
+                    date: new Date(),
+                    audioname: audioFilename
+                  }
+
+                );
+                console.log('Video converted to audio');
+
+                let alert = require('alert');
+                alert("File ready to download!");
+              });
+              uploadStream.on('error', (error) => {
+                console.error('Failed to upload audio file:', error);
+              });
+            });
+
+          })
+          .on('error', (error) => {
+            console.error('Error converting video to audio:', error);
+          })
+          .run();
+
+        // const downloadStream = bucket.openDownloadStream(fileId);
+
+      });
+
+      uploadStream.on('error', (error) => {
+        console.error('Failed to upload video file:', error);
+        // client.close();
+      });
+
+    });
   }
-  videoId = audio._id.toString();
-  console.log(videoId)
-  // await Audio.findOrCreate({
-  //   name: fileName,
-  //   video: file
-  // }, function (err, res) {
-  //   if (err) {
-  //     console.log("Hello I am here")
-  //     // console.log(err);
-  //     // console.log(res.id)
-  //     videoId=res.id;
-  //   } else {
-  //     videoId = res.id;
-  //     console.log('File uploaded to MongoDB!', videoId);
-  //   }
-  // });
-  // Audio.findOne({ name: fileName }, function (err, user) {
-  //   if (err) {
-  //     console.log(err);
-  //   } else {
-  //     if (file) {
 
-  //       // file.save();
-  //     }
-  //   }
-  // });
-
-
+  // let audio;
+  if (filesize > 16000000) {
+    await convertLargeFile();
+  } else {
+    let audio = await Audio.findOne({ username: username, videoname: fileName, video: file });
+    if (!audio) {
+      audio = await Audio.create({ username: username, videoname: fileName, video: file });
+      console.log("Hello1");
+    } else {
+      console.log("Hello2");
+    }
+    videoId = audio._id.toString();
+    console.log(videoId)
+  }
 
   async function convertVideoToAudio(videoId) {
     // Get the video document from MongoDB
@@ -426,8 +498,9 @@ app.post("/upload", upload.single('videofile'), async function (req, res) {
     const video = await Audio.findOne({ _id: videoId });
     console.log("hello4")
     console.log(video.videoname);
+
     // Generate a unique filename for the audio file
-    audioFilename = `audio_${videoId}.mp3`;
+    audioFilename = `audio_${video.videoname}_.mp3`;
 
     // Convert the video to audio using FFmpeg
     ffmpeg(video.videoname)
@@ -463,7 +536,11 @@ app.post("/upload", upload.single('videofile'), async function (req, res) {
       })
       .run();
   }
-  await convertVideoToAudio(videoId);
+  if (videoId) {
+    await convertVideoToAudio(videoId);
+  }
+  // await convertVideoToAudio(videoId);
+
 
   // // Note: Provide these AWS settings
   // const awsRegion = 'us-west-1';
