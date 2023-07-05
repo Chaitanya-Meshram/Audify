@@ -1,4 +1,17 @@
 <%- include('partials/header') %>
+  <section class="navbar-bg">
+    <nav class="navbar navbar-expand-lg navbar-light">
+      <div class="container">
+        <a class="navbar-brand" href=""><img alt="" width="32" height="32" src="/images/logo7.png"
+            class="brand-logo hidden-xs-down" />
+          <strong>audify</strong>
+        </a>
+
+        <a href="/" class="ml-auto home nav-item nav-link">Home</a>
+      </div>
+    </nav>
+  </section>
+
   <div class="container mt-5">
     <h1>Register</h1>
 
@@ -11,7 +24,7 @@
             <form action="/register" method="POST">
               <div class="form-group">
                 <label for="email">Email</label>
-                <input type="email" class="form-control" name="username">
+                <input type="email" class="form-control" name="email">
               </div>
               <div class="form-group">
                 <label for="password">Password</label>
