@@ -15,10 +15,21 @@ const extractAudio = require('ffmpeg-extract-audio')
 const download = require('download');
 const multer = require('multer');
 // const { MongoClient } = require('mongodb');
-const ffmpeg = require('fluent-ffmpeg');
+// const ffmpeg = require('fluent-ffmpeg');
 const { Readable } = require('stream');
-const { MongoClient, ObjectId } = require('mongodb');
+const { MongoClient, GridFSBucket, ObjectId, Timestamp, Double } = require('mongodb');
 const fs = require('fs');
+const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+const ffmpeg = require('fluent-ffmpeg');
+ffmpeg.setFfmpegPath(ffmpegPath);
+// const SpeechToTextV1 = require('watson-developer-cloud/speech-to-text/v1');
+// const DeepSpeech = require('deepspeech');
+// const { Pocketsphinx } = require('pocketsphinx');
+const Creatomate = require('creatomate');
+const transcribe = require('./transcribe');
+const generateSubtitles = require('./generateSubtitles');
+
+const client = new Creatomate.Client(process.env.CREATOMATE_API_KEY);
 
 const app = express();
 
@@ -39,10 +50,10 @@ app.use(session({
 app.use(passport.initialize());
 app.use(passport.session());
 
-
 mongoose.connect("mongodb+srv://admin-chaitanya:Test123@cluster0.upazi.mongodb.net/audify?retryWrites=true&w=majority");
 
 const userSchema = new mongoose.Schema({
+  username: String,
   email: String,
   password: String,
   googleId: String,
@@ -50,7 +61,11 @@ const userSchema = new mongoose.Schema({
   microsoftId: String
 });
 const audioSchema = new mongoose.Schema({
-  name: String,
+  date: Date,
+  duration: mongoose.Types.Decimal128,
+  username: String,
+  videoname: String,
+  audioname: String,
   video: Buffer,
   audio: Buffer
 });
@@ -85,6 +100,7 @@ passport.use(new GoogleStrategy({
   function (accessToken, refreshToken, profile, cb) {
     console.log(profile);
     User.findOrCreate({
+      username: profile.displayName,
       googleId: profile.id
     }, function (err, user) {
       return cb(err, user);
@@ -100,6 +116,7 @@ passport.use(new FacebookStrategy({
   function (accessToken, refreshToken, profile, cb) {
     console.log(profile);
     User.findOrCreate({
+      username: profile.displayName,
       facebookId: profile.id
     }, function (err, user) {
       return cb(err, user);
@@ -129,7 +146,8 @@ passport.use(new MicrosoftStrategy({
   function (accessToken, refreshToken, profile, done) {
     console.log(profile);
     User.findOrCreate({
-      userId: profile.id
+      username: profile.displayName,
+      microsoftId: profile.id
     }, function (err, user) {
       return done(err, user);
     });
@@ -193,7 +211,7 @@ app.get("/login", function (req, res) {
 });
 app.post("/login", function (req, res) {
   const user = new User({
-    username: req.body.username,
+    email: req.body.email,
     password: req.body.password
   });
 
@@ -212,9 +230,9 @@ app.get("/register", function (req, res) {
   res.render("register");
 });
 app.post("/register", function (req, res) {
-  User.register({
-    username: req.body.username
-  }, req.body.password, function (err, user) {
+  User.register(({
+    email: req.body.email
+  }), req.body.password, function (err, user) {
     if (err) {
       console.log(err);
       res.redirect("/register");
@@ -226,75 +244,40 @@ app.post("/register", function (req, res) {
   });
 });
 
-app.get("/submit", function (req, res) {
+app.get("/history", function (req, res) {
   if (req.isAuthenticated()) {
-    res.render("submit");
+    Audio.find({ username: req.user.username }, function (err, userAudios) {
+      if (err) {
+        console.log(err);
+      } else {
+        if (userAudios) {
+          console.log("userAudios are found");
+          // console.log(userAudios.videoname);
+          // console.log(userAudios.audioname);
+          res.render("history", {
+            userAudios: userAudios,
+            username: req.user.username
+          });
+        }
+      }
+    });
   } else {
     res.redirect("/login");
   }
 });
-app.post("/submit", function (req, res) {
-  const submittedSecret = req.body.secret;
-  User.findById(req.user.id, function (err, user) {
-    if (err) {
-      console.log(err);
-    } else {
-      if (user) {
-        user.secret = submittedSecret;
-        user.save(function () {
-          res.redirect("/secrets");
-        });
-      }
-    }
-  });
-});
 
-app.get("/secrets", function (req, res) {
-  User.find({
-    "secret": {
-      $ne: null
-    }
-  }, function (err, users) {
-    if (err) {
-      console.log(err);
-    } else {
-      if (users) {
-        res.render("secrets", {
-          converted: false
-        });
-      }
-    }
-  });
-});
+app.post("/delete", async function (req, res) {
+  const username = req.user.username;
+  // const id = req.body.id;
+  const videoname = req.body.videoname;
+  const audioname = req.body.audioname;
 
-// upload.single('videofile')
-app.post("/upload", upload.single('videofile'), function (req, res) {
-  const file = req.file.buffer;
-  const fileName = req.file.originalname;
+  console.log(username);
+  // console.log(id);
+  console.log(videoname);
+  console.log(audioname);
+
   // Example usage
-  var videoId; // Replace with the ID of the video file stored in MongoDB
-
-  Audio.findOrCreate({
-    name: fileName,
-    video: file
-  }, function (err, res) {
-    if (err) {
-      console.log(err);
-    } else {
-      videoId = res.id;
-      console.log('File uploaded to MongoDB!', videoId);
-    }
-  });
-  // Audio.findOne({ name: fileName }, function (err, user) {
-  //   if (err) {
-  //     console.log(err);
-  //   } else {
-  //     if (file) {
-
-  //       // file.save();
-  //     }
-  //   }
-  // });
   const uri = 'mongodb+srv://admin-chaitanya:Test123@cluster0.upazi.mongodb.net/audify?retryWrites=true&w=majority'; // MongoDB connection URI
   const dbName = 'audify'; // Name of your MongoDB database
   // Collection name where the video file is stored
@@ -310,52 +293,377 @@ app.post("/upload", upload.single('videofile'), function (req, res) {
       console.error('Error connecting to MongoDB:', error);
     }
   }
-  connect();
+  await connect();
 
-  async function convertVideoToAudio(videoId) {
-    try {
-      // Get the video document from MongoDB
-      const db = client.db(dbName);
-      const collection = db.collection(collectionName);
-      const video = await collection.findOne({ _id: videoId });
+  console.log("hello1")
+  // Get the database reference
+  const db = client.db(dbName);
+  // Initialize GridFSBucket
+  const bucket = new GridFSBucket(db);
+  console.log("hello2")
+  const collection = db.collection(collectionName);
+  console.log("hello3")
 
-      // Generate a unique filename for the audio file
-      const audioFilename = `audio_${videoId}.mp3`;
+  var myquery = { username: username, videoname: videoname, audioname: audioname };
+  console.log("hello4")
 
-      // Convert the video to audio using FFmpeg
-      ffmpeg(video.filePath)
-        .output(audioFilename)
-        .on('end', async () => {
-          // Read the converted audio file
-          const audioFileData = await fs.promises.readFile(audioFilename);
-
-          // Update the video document with the audio file data
-          await collection.updateOne(
-            { _id: videoId },
-            {
-              $set: {
-                audio: audioFileData,
-                name: audioFilename
-              }
-            }
-          );
-
-          // Save the audio file on your device
-          await fs.promises.writeFile(audioFilename, audioFileData);
-
-          console.log('Video converted to audio and saved successfully.');
-        })
-        .on('error', (error) => {
-          console.error('Error converting video to audio:', error);
-        })
-        .run();
-    } catch (error) {
-      console.error('Error converting video to audio:', error);
+  Audio.deleteOne(myquery, function (err, obj) {
+    if (err) {
+      console.log(err);
+    } else {
+      console.log("video and audio deleted");
+      res.redirect("/history");
     }
-  }
-  convertVideoToAudio(videoId);
+  });
+  console.log("HELLO");
 
 });
+
+
+app.get("/secrets", function (req, res) {
+  if (req.isAuthenticated()) {
+    console.log("user is authenticated");
+  } else {
+    res.redirect("/login");
+  }
+  res.render("secrets");
+});
+
+var audioFilename;
+var audioFileData;
+
+
+// upload.single('videofile')
+
+app.post("/upload", upload.single('videofile'), async function (req, res) {
+
+  if (req.isAuthenticated()) {
+    console.log("user is authenticated");
+  } else {
+    res.redirect("/login");
+  }
+
+  const username = req.user.username;
+  const filesize = req.file.size;
+  const file = req.file.buffer;
+  const fileName = req.file.originalname;
+  // console.log(req.file.size)
+  // Example usage
+  const uri = 'mongodb+srv://admin-chaitanya:Test123@cluster0.upazi.mongodb.net/audify?retryWrites=true&w=majority'; // MongoDB connection URI
+  const dbName = 'audify'; // Name of your MongoDB database
+  // Collection name where the video file is stored
+  const collectionName = 'audios';
+
+  const client = new MongoClient(uri);
+
+  async function connect() {
+    try {
+      await client.connect();
+      console.log('Connected to MongoDB');
+    } catch (error) {
+      console.error('Error connecting to MongoDB:', error);
+    }
+  }
+  await connect();
+
+  const db = client.db(dbName);
+  const bucket = new GridFSBucket(db);
+  const videoPath = fileName;
+
+  var videoId; // Replace with the ID of the video file stored in MongoDB
+
+  async function convertLargeFile() {
+    fs.readFile(videoPath, (error, data) => {
+      if (error) {
+        console.error('Failed to read video file:', error);
+        return;
+      }
+      const uploadStream = bucket.openUploadStream(fileName);
+      uploadStream.write(data);
+      uploadStream.end();
+      // console.log(db.filename);
+      // console.log(db.fs.files.length);
+
+      uploadStream.on('finish', () => {
+        console.log('Video file uploaded successfully');
+
+        const videoname = uploadStream.filename;
+        videoId = uploadStream.id;
+        console.log(uploadStream.id)
+        console.log(uploadStream.filename)
+
+        // Generate a unique filename for the audio file
+        audioFilename = `audio_${videoname}_.mp3`;
+
+        // Convert the video to audio using FFmpeg
+        ffmpeg(videoname)
+          .output(audioFilename)
+          .on('end', async () => {
+            // Read the converted audio file
+            audioFileData = await fs.promises.readFile(audioFilename);
+
+            fs.readFile(audioFilename, (error, data) => {
+              if (error) {
+                console.error('Failed to read video file:', error);
+                return;
+              }
+              const uploadStream = bucket.openUploadStream(audioFilename);
+              uploadStream.write(data);
+              uploadStream.end();
+              // console.log(db.filename);
+              // console.log(db.fs.files.length);
+
+              uploadStream.on('finish', async () => {
+                console.log('Audio file uploaded successfully');
+
+                const { getVideoDurationInSeconds } = require('get-video-duration');
+                const duration = await getVideoDurationInSeconds(audioFilename);
+                console.log(duration);
+
+                // Update the video document with the audio file data
+                // Audio.create({ username: username, videoname: fileName, video: file });
+                await Audio.create(
+                  {
+                    username: username,
+                    videoname: fileName,
+                    duration: duration,
+                    date: new Date(),
+                    audioname: audioFilename
+                  }
+
+                );
+                console.log('Video converted to audio');
+
+                let alert = require('alert');
+                alert("File ready to download!");
+              });
+              uploadStream.on('error', (error) => {
+                console.error('Failed to upload audio file:', error);
+              });
+            });
+
+          })
+          .on('error', (error) => {
+            console.error('Error converting video to audio:', error);
+          })
+          .run();
+
+        // const downloadStream = bucket.openDownloadStream(fileId);
+
+      });
+
+      uploadStream.on('error', (error) => {
+        console.error('Failed to upload video file:', error);
+        // client.close();
+      });
+
+    });
+  }
+
+  // let audio;
+  if (filesize > 16000000) {
+    await convertLargeFile();
+  } else {
+    let audio = await Audio.findOne({ username: username, videoname: fileName, video: file });
+    if (!audio) {
+      audio = await Audio.create({ username: username, videoname: fileName, video: file });
+      console.log("Hello1");
+    } else {
+      console.log("Hello2");
+    }
+    videoId = audio._id.toString();
+    console.log(videoId)
+  }
+
+  async function convertVideoToAudio(videoId) {
+    // Get the video document from MongoDB
+    console.log("hello1")
+    const db = client.db(dbName);
+    console.log("hello2")
+    const collection = db.collection(collectionName);
+    console.log("hello3")
+    const video = await Audio.findOne({ _id: videoId });
+    console.log("hello4")
+    console.log(video.videoname);
+
+    // Generate a unique filename for the audio file
+    audioFilename = `audio_${video.videoname}_.mp3`;
+
+    // Convert the video to audio using FFmpeg
+    ffmpeg(video.videoname)
+      .output(audioFilename)
+      .on('end', async () => {
+        // Read the converted audio file
+        audioFileData = await fs.promises.readFile(audioFilename);
+
+        const { getVideoDurationInSeconds } = require('get-video-duration');
+        const duration = await getVideoDurationInSeconds(audioFilename);
+        console.log(duration);
+
+        // Update the video document with the audio file data
+        await Audio.updateOne(
+          { _id: videoId },
+          {
+            $set: {
+              duration: duration,
+              date: new Date(),
+              audio: audioFileData,
+              audioname: audioFilename
+            }
+          }
+        );
+
+        console.log('Video converted to audio');
+
+        let alert = require('alert');
+        alert("File ready to download!");
+      })
+      .on('error', (error) => {
+        console.error('Error converting video to audio:', error);
+      })
+      .run();
+  }
+  if (videoId) {
+    await convertVideoToAudio(videoId);
+  }
+  // await convertVideoToAudio(videoId);
+
+
+  // // Note: Provide these AWS settings
+  // const awsRegion = 'us-west-1';
+  // const bucketName = 'audify-project';
+  // const bucketKey = `subtitle-${new Date().getTime()}`;
+  // const transcribeJobName = `example-${new Date().getTime()}`;
+
+  // // Note: Provide a URL to a video file
+  // const mediaUri = document.video;
+
+  // async function run() {
+  //   console.log('Transcribing video using AWS Transcribe...');
+
+  //   // Invoke AWS Transcribe to automatically generate the subtitles from the video
+  //   await transcribe(transcribeJobName, mediaUri, awsRegion, bucketName, bucketKey);
+
+  //   // Create subtitle keyframes
+  //   const subtitleKeyframes = await generateSubtitles(awsRegion, bucketName, bucketKey);
+
+  //   console.log('Creating video with Creatomate...');
+
+  //   // Create the video. Note that we don't provide an output width and height,
+  //   // as the Creatomate API detects these automatically based on the first found video element
+  //   const source = new Creatomate.Source({
+  //     outputFormat: 'mp4',
+  //     elements: [
+  //       // The video file. Since we do not specify a duration, the length of the video element
+  //       // is determined by the video file provided
+  //       new Creatomate.Video({
+  //         source: mediaUri,
+  //       }),
+  //       // The subtitles
+  //       new Creatomate.Text({
+  //         // Make the subtitle container as large as the screen with some padding
+  //         width: '100%',
+  //         height: '100%',
+  //         xPadding: '3 vmin',
+  //         yPadding: '8 vmin',
+
+  //         // Align text to bottom center
+  //         xAlignment: '50%',
+  //         yAlignment: '100%',
+
+  //         // Text style – note that the default fill color is null (transparent)
+  //         fontWeight: '800',
+  //         fontSize: '8.48 vh',
+  //         fillColor: null,
+  //         shadowColor: 'rgba(0,0,0,0.65)',
+  //         shadowBlur: '1.6 vmin',
+
+  //         text: subtitleKeyframes,
+  //       }),
+  //       // Progress bar
+  //       new Creatomate.Rectangle({
+  //         x: '0%',
+  //         y: '0%',
+  //         width: '100%',
+  //         height: '3%',
+  //         xAnchor: '0%',
+  //         yAnchor: '0%',
+  //         fillColor: '#fff',
+  //         animations: [
+  //           new Creatomate.Wipe({
+  //             xAnchor: '0%',
+  //             fade: false,
+  //             easing: 'linear',
+  //           }),
+  //         ],
+  //       }),
+
+  //     ],
+  //   });
+
+  //   // Render the video
+  //   const renders = await client.render({ source });
+  //   console.log('Completed:', renders);
+  // }
+
+  // run()
+  //   .catch(error => console.error(error));
+
+
+});
+
+app.get('/download', async (req, res) => {
+  // Logic to generate and send the file
+  console.log('button was clicked');
+
+  await fs.promises.writeFile(audioFilename, audioFileData);
+
+  console.log('audio file downloaded ');
+  let alert = require('alert');
+  alert("Audio file downloaded!");
+
+  // const electron = require('electron');
+  // const BrowserWindow = electron.remote.BrowserWindow;
+
+  // // Keep a global reference of the window object
+  // const mainWindow = new BrowserWindow({
+  //   width: 800,
+  //   height: 600,
+  //   webPreferences: {
+  //     nodeIntegration: true,
+  //     enableRemoteModule: true
+  //   }
+  // });
+
+  // dialog
+  //   .showSaveDialog(mainWindow, {
+  //     title: 'Save File',
+  //     defaultPath: path.join(app.getPath('downloads'), audioFilename),
+  //     filters: [
+  //       { name: 'All Files', extensions: ['*'] },
+  //     ],
+  //   })
+  //   .then((result) => {
+  //     if (!result.canceled) {
+  //       // Retrieve the file path selected by the user
+  //       const filePath = result.filePath;
+
+  //       // Trigger the file download
+  //       mainWindow.webContents.downloadURL(audioFileData, filePath);
+  //     }
+  //   })
+  //   .catch((err) => {
+  //     console.log(err);
+  //   });
+
+  res.redirect("/secrets");
+  // window.location = "./download"
+  // const Window = require('window');
+  // const window = new Window();
+  // window.document.alert(window.document.location);
+  // window.open(url, '_blank');
+});
+
 
 app.get("/logout", function (req, res) {
   req.logout(function (err) {
