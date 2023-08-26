@@ -9,7 +9,7 @@ Technologies Used: HTML, CSS, NodeJS for backend functionality, EJS as a templat
 
 <h2>📸 Pages of our Audify Web Application are:</h2>
 <p>Homepage</p>
-![home](https://github.com/Chaitanya-Meshram/Audify/assets/75986148/c070e802-9edb-4138-b1f3-aa5048541125)
+![](public/images/convert.jpg)
 <p>Login</p>
 ![login](https://github.com/Chaitanya-Meshram/Audify/assets/75986148/4c5c9901-3f63-45fd-9b2e-0f44652af2fd)
 <p>Convert</p>
